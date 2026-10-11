@@ -1,0 +1,49 @@
+name: ASO Lilit Quality Gate
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check source syntax
+        run: python -m py_compile server.py ASO_DIAGNOSTICS.py
+      - name: Check that local secrets were not committed
+        shell: bash
+        run: |
+          for path in config.json .env .venv observer_log.txt; do
+            if git ls-files --error-unmatch "$path" >/dev/null 2>&1; then
+              echo "::error::Private file committed: $path"
+              exit 1
+            fi
+          done
+      - name: Install MCP SDK
+        run: python -m pip install -r requirements.txt
+      - name: Verify MCP 1.x interface
+        run: python -c "from mcp.server.fastmcp import FastMCP; print('MCP_IMPORT=PASS')"
+      - name: Server tool registration smoke test
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/andreslav"
+          printf '{"allowed_roots":{"andreslav":"%s"}}\n' "$RUNNER_TEMP/andreslav" > config.json
+          python - <<'PY'
+          import server
+          names = set(server.mcp._tool_manager._tools)
+          required = {"health", "list_files", "read_project_text", "git_status", "git_recent_commits"}
+          assert required <= names, f"Missing tools: {required - names}"
+          assert server.health()["mode"] == "read_only"
+          print("ASO_TOOLS=PASS")
+          PY
+          rm -f config.json
