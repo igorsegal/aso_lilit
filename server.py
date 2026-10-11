@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from source_analyzer import inspect_source
 
 BASE = Path(__file__).resolve().parent
 CONFIG = BASE / "config.json"
@@ -100,6 +101,18 @@ def git_status() -> dict:
 def git_recent_commits(count: int = 8) -> dict:
     """Return recent local commit metadata; no network requests."""
     return git("log", f"-{max(1, min(count, 30))}", "--date=iso-strict", "--pretty=format:%h %ad %s")
+
+
+@mcp.tool()
+def analyze_source(root_name: str, relative_path: str) -> dict:
+    """Inspect a permitted source file. Python syntax is parsed, MQL4/C++ need compilers."""
+    path = safe_path(root_name, relative_path)
+    if any(word in path.name.lower() for word in ("secret", "token", "credential", "password", ".env")):
+        raise ValueError("Sensitive filename denied")
+    report = inspect_source(path, run_cpp_compiler=False)
+    report["root"] = root_name
+    report["relative_path"] = relative_path
+    return report
 
 
 if __name__ == "__main__":
